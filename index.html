@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コンディションナビ</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+  --bg: #eef2f7;
+  --card: white;
+  --text: black;
+  --main: #4a6cf7;
+}
+
+.dark {
+  --bg: #1e1e1e;
+  --card: #2c2c2c;
+  --text: white;
+}
+
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  transition: 0.3s;
+}
+
+.header {
+  background: var(--main);
+  color: white;
+  padding: 15px;
+  text-align: center;
+}
+
+.container {
+  background: var(--card);
+  margin: 10px;
+  padding: 15px;
+  border-radius: 12px;
+}
+
+select, button, textarea {
+  width: 100%;
+  padding: 10px;
+  margin: 5px 0;
+  border-radius: 8px;
+}
+
+button {
+  background: var(--main);
+  color: white;
+  border: none;
+}
+
+.good { color: #00c853; }
+.normal { color: orange; }
+.bad { color: red; }
+
+#weatherIcon {
+  font-size: 60px;
+  text-align: center;
+}
+
+#trend {
+  white-space: pre-line;
+  margin-top: 10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="header">
+コンディションナビ
+<button onclick="toggleDark()">🌙</button>
+</div>
+
+<div class="container">
+
+<div id="weatherIcon">☀️</div>
+
+<select id="sleep">
+<option value="1">睡眠 少</option>
+<option value="2">普通</option>
+<option value="3">良い</option>
+<option value="4">十分</option>
+</select>
+
+<select id="sleepy">
+<option value="1">眠くない</option>
+<option value="2">普通</option>
+<option value="3">眠い</option>
+</select>
+
+<select id="tired">
+<option value="1">元気</option>
+<option value="2">普通</option>
+<option value="3">疲れ</option>
+</select>
+
+<select id="motivation">
+<option value="1">モチベーション低い</option>
+<option value="2">普通</option>
+<option value="3">高い</option>
+</select>
+
+<textarea id="memo" placeholder="メモ"></textarea>
+
+<button onclick="checkCondition()">記録</button>
+<button onclick="resetData()">データ削除</button>
+
+<button onclick="showAll()">全体</button>
+<button onclick="showWeek()">直近7日</button>
+
+<div id="result"></div>
+<div id="compare"></div>
+<div id="streak"></div>
+<div id="trend"></div>
+
+</div>
+
+<div class="container">
+<canvas id="chart"></canvas>
+</div>
+
+<script>
+// ===== データ =====
+let data = JSON.parse(localStorage.getItem("records")) || [];
+let lastDate = localStorage.getItem("lastDate") || "";
+let streak = parseInt(localStorage.getItem("streak")) || 0;
+let viewMode = "all";
+
+// ===== 要素 =====
+let result = document.getElementById("result");
+let compareDiv = document.getElementById("compare");
+let streakDiv = document.getElementById("streak");
+let weatherIcon = document.getElementById("weatherIcon");
+let trendDiv = document.getElementById("trend");
+
+// ===== 日付 =====
+function getToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getYesterday() {
+  let d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+// ===== 天気UI =====
+function updateWeather(score) {
+  let icon = "☀️";
+  let bg = "#fff9c4";
+
+  if (score >= 6) {
+    icon = "☀️";
+    bg = "#fff9c4";
+  } else if (score >= 3) {
+    icon = "⛅";
+    bg = "#e1f5fe";
+  } else {
+    icon = "🌧️";
+    bg = "#e1bee7";
+  }
+
+  weatherIcon.innerText = icon;
+  document.body.style.background = bg;
+}
+
+// ===== 傾向分析 =====
+function analyzeTrend() {
+
+  if (data.length < 3) {
+    trendDiv.innerText = "データが少ない";
+    return;
+  }
+
+  let recent = data.slice(-7);
+
+  let avg = recent.reduce((sum, d) => sum + d.score, 0) / recent.length;
+
+  let diff = recent[recent.length - 1].score - recent[0].score;
+
+  let trendText = diff > 1 ? "↗ 上昇傾向" :
+                  diff < -1 ? "↘ 下降傾向" :
+                  "→ 安定";
+
+  let advice = "";
+
+  if (avg >= 6) {
+    advice = "良い状態が続いている。維持しよう。";
+  } else if (avg >= 3) {
+    advice = "安定している。無理せず継続。";
+  } else {
+    advice = "疲れ気味。休息を優先。";
+  }
+
+  trendDiv.innerText =
+    `平均: ${avg.toFixed(1)} / ${trendText}\n${advice}`;
+}
+
+// ===== メイン =====
+function checkCondition() {
+
+  let today = getToday();
+
+  if (lastDate === today) {
+    alert("今日は記録済み！");
+    return;
+  }
+
+  let sleep = +document.getElementById("sleep").value;
+  let sleepy = +document.getElementById("sleepy").value;
+  let tired = +document.getElementById("tired").value;
+  let motivation = +document.getElementById("motivation").value;
+  let memo = document.getElementById("memo").value;
+
+  let score = sleep + (motivation * 2) - sleepy - tired;
+
+  let last = data.length ? data[data.length - 1].score : null;
+
+  let compare = last !== null
+    ? (score > last ? "昨日より良い" :
+       score < last ? "昨日より疲れてる" :
+       "昨日と同じ")
+    : "";
+
+  let msg = score >= 6 ? "調子いい！" :
+            score >= 3 ? "普通" : "休もう";
+
+  result.innerText = msg + " (score: " + score + ")";
+  result.className = score >= 6 ? "good" :
+                     score >= 3 ? "normal" : "bad";
+
+  compareDiv.innerText = compare;
+
+  data.push({date: today, score, memo});
+  localStorage.setItem("records", JSON.stringify(data));
+
+  if (lastDate === getYesterday()) streak++;
+  else streak = 1;
+
+  lastDate = today;
+  localStorage.setItem("lastDate", today);
+  localStorage.setItem("streak", streak);
+
+  streakDiv.innerText = "連続: " + streak;
+
+  updateWeather(score);
+  analyzeTrend();
+  drawChart();
+}
+
+// ===== グラフ =====
+let ctx = document.getElementById('chart').getContext('2d');
+let chart;
+
+function drawChart() {
+
+  if (chart) chart.destroy();
+
+  let filtered = viewMode === "week" ? data.slice(-7) : data;
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: filtered.map(d => d.date),
+      datasets: [{
+        data: filtered.map(d => d.score),
+        borderColor: '#4a6cf7',
+        tension: 0.3
+      }]
+    },
+    options: {
+      plugins:{legend:{display:false}}
+    }
+  });
+}
+
+// ===== 切り替え =====
+function showAll() {
+  viewMode = "all";
+  drawChart();
+}
+
+function showWeek() {
+  viewMode = "week";
+  drawChart();
+}
+
+// ===== その他 =====
+function resetData() {
+  if (confirm("全部消す？")) {
+    localStorage.clear();
+    location.reload();
+  }
+}
+
+function toggleDark() {
+  document.body.classList.toggle("dark");
+  localStorage.setItem("dark", document.body.classList.contains("dark"));
+}
+
+if (localStorage.getItem("dark") === "true") {
+  document.body.classList.add("dark");
+}
+
+// ===== 初期表示 =====
+drawChart();
+analyzeTrend();
+streakDiv.innerText = "連続: " + streak;
+
+</script>
+
+</body>
+</html>
